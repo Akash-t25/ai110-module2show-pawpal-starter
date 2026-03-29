@@ -43,6 +43,28 @@ PawPal+ includes four algorithmic features beyond basic priority-based schedulin
 | **Recurring tasks** | `Task.next_occurrence()` + `Pet.complete_task()` | When a task with `frequency="daily"` or `"weekly"` is marked complete, Python's `timedelta` shifts the due date forward by 1 or 7 days and appends a fresh copy to the pet's task list automatically. `"as-needed"` tasks never auto-recur. |
 | **Conflict detection** | `Scheduler.detect_conflicts()` | After building the plan, checks every pair of `ScheduledEntry` items for interval overlap using `a.start < b.end AND b.start < a.end`. Returns human-readable warning strings; the plan is still produced rather than crashing. Only tasks with a `pinned_start` ("HH:MM") can produce conflicts — flexible tasks are sorted by slot, not pinned to a clock time. |
 
+## Testing PawPal+
+
+```bash
+python -m pytest              # run all tests
+python -m pytest -v           # verbose — shows each test name and pass/fail
+python -m pytest tests/test_pawpal.py::TestEdgeCases   # run one class only
+```
+
+The test suite lives in [tests/test_pawpal.py](tests/test_pawpal.py) and is organised into five classes:
+
+| Class | What it covers |
+|---|---|
+| `TestTask` | `mark_complete`, `priority_score`, `is_high_priority`, `next_occurrence` (daily/weekly/as-needed), `pinned_start_minute` |
+| `TestPet` | `add_task` / `remove_task` counts, `needs_daily_walk`, `complete_task` with and without recurrence |
+| `TestOwner` | `all_tasks` aggregation, `total_task_minutes`, `filter_tasks` (by status, pet name, category, combined) |
+| `TestScheduler` | Priority ordering, time budget, completed-task exclusion, `sort_by_time`, conflict detection (overlap, adjacent, single task) |
+| `TestEdgeCases` | Empty pets/owners, all-tasks-done, exact budget fit, 1-minute-over budget, `ScheduledEntry` time strings (including noon crossing), `DailyPlan.display()` output, custom day-start, `next_occurrence` field preservation and non-mutation, case-insensitive filtering |
+
+**Confidence level: ★★★★☆ (4/5)**
+
+The scheduler's greedy algorithm and all data-layer behaviours are well covered. The remaining gap (½ star) is integration tests that drive the Streamlit UI directly and end-to-end tests against multi-day recurring task chains.
+
 ### Suggested workflow
 
 1. Read the scenario carefully and identify requirements and edge cases.

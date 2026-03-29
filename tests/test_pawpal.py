@@ -373,3 +373,250 @@ class TestScheduler:
         owner.add_pet(pet)
         plan = Scheduler(owner).generate_plan()
         assert plan.conflicts == []
+
+
+# ---------------------------------------------------------------------------
+# Edge-case tests
+# ---------------------------------------------------------------------------
+
+class TestEdgeCases:
+    """Boundary conditions and less-obvious scenarios."""
+
+    # -- empty / zero states -------------------------------------------------
+
+    def test_pet_with_no_tasks_produces_empty_plan(self):
+        """A pet registered with no tasks should result in an empty schedule."""
+        owner = Owner(name="Jordan", available_minutes=120)
+        owner.add_pet(Pet(name="Mochi", species="dog", age_years=3))
+        plan = Scheduler(owner).generate_plan()
+        assert plan.entries == []
+        assert plan.skipped_tasks == []
+        assert plan.conflicts == []
+
+    def test_owner_with_no_pets_produces_empty_plan(self):
+        """An owner with no pets registered should produce an empty schedule."""
+        owner = Owner(name="Jordan", available_minutes=120)
+        plan = Scheduler(owner).generate_plan()
+        assert plan.entries == []
+
+    def test_all_tasks_completed_produces_empty_schedule(self):
+        """If every task is already done, nothing should be scheduled."""
+        owner = Owner(name="Jordan", available_minutes=120)
+        pet = Pet(name="Mochi", species="dog", age_years=3)
+        for title in ("Walk", "Feeding", "Play"):
+            task = Task(title=title, duration_minutes=10, priority="high")
+            task.mark_complete()
+            pet.add_task(task)
+        owner.add_pet(pet)
+        plan = Scheduler(owner).generate_plan()
+        assert plan.entries == []
+
+    def test_daily_plan_total_minutes_zero_when_no_entries(self):
+        """total_scheduled_minutes() should return 0 for an empty plan."""
+        assert DailyPlan().total_scheduled_minutes() == 0
+
+    def test_all_tasks_returns_empty_list_for_owner_with_no_pets(self):
+        """Owner.all_tasks() should return [] when no pets are registered."""
+        assert Owner(name="Jordan", available_minutes=60).all_tasks() == []
+
+    def test_sort_by_time_empty_list_returns_empty(self):
+        """sort_by_time([]) should not raise and should return []."""
+        assert Scheduler.sort_by_time([]) == []
+
+    # -- exact boundary: task fills remaining budget exactly -----------------
+
+    def test_task_that_exactly_fills_budget_is_scheduled(self):
+        """A single task whose duration equals available_minutes must be scheduled."""
+        owner = Owner(name="Jordan", available_minutes=30)
+        pet = Pet(name="Mochi", species="dog", age_years=3)
+        pet.add_task(Task(title="Walk", duration_minutes=30, priority="high"))
+        owner.add_pet(pet)
+        plan = Scheduler(owner).generate_plan()
+        assert len(plan.entries) == 1
+        assert plan.skipped_tasks == []
+
+    def test_task_one_minute_over_budget_is_skipped(self):
+        """A task 1 minute over the budget must land in skipped_tasks."""
+        owner = Owner(name="Jordan", available_minutes=29)
+        pet = Pet(name="Mochi", species="dog", age_years=3)
+        pet.add_task(Task(title="Walk", duration_minutes=30, priority="high"))
+        owner.add_pet(pet)
+        plan = Scheduler(owner).generate_plan()
+        assert plan.entries == []
+        assert len(plan.skipped_tasks) == 1
+
+    # -- ScheduledEntry helpers ----------------------------------------------
+
+    def test_scheduled_entry_end_minute(self):
+        """end_minute() should equal start_minute + task.duration_minutes."""
+        task  = Task(title="Walk", duration_minutes=30, priority="high")
+        entry = ScheduledEntry(task=task, start_minute=480, reason="test")
+        assert entry.end_minute() == 510
+
+    def test_scheduled_entry_start_time_str_format(self):
+        """start_time_str() for minute 480 (8:00 AM) should return '8:00 AM'."""
+        task  = Task(title="Walk", duration_minutes=30, priority="high")
+        entry = ScheduledEntry(task=task, start_minute=480, reason="test")
+        assert entry.start_time_str() == "8:00 AM"
+
+    def test_scheduled_entry_end_time_str_format(self):
+        """end_time_str() for an entry starting at 480 with 30 min = '8:30 AM'."""
+        task  = Task(title="Walk", duration_minutes=30, priority="high")
+        entry = ScheduledEntry(task=task, start_minute=480, reason="test")
+        assert entry.end_time_str() == "8:30 AM"
+
+    def test_scheduled_entry_crosses_noon(self):
+        """An entry starting at 11:45 AM and lasting 30 min ends at 12:15 PM."""
+        task  = Task(title="Feeding", duration_minutes=30, priority="high")
+        entry = ScheduledEntry(task=task, start_minute=11 * 60 + 45, reason="test")
+        assert entry.end_time_str() == "12:15 PM"
+
+    # -- DailyPlan.display() smoke test --------------------------------------
+
+    def test_daily_plan_display_returns_string(self):
+        """display() should return a non-empty string regardless of content."""
+        plan = DailyPlan()
+        output = plan.display()
+        assert isinstance(output, str)
+        assert len(output) > 0
+
+    def test_daily_plan_display_includes_task_title(self):
+        """display() should include the task title in its output."""
+        task  = Task(title="Morning walk", duration_minutes=30, priority="high")
+        entry = ScheduledEntry(task=task, start_minute=480, reason="High priority")
+        plan  = DailyPlan()
+        plan.add_entry(entry)
+        assert "Morning walk" in plan.display()
+
+    def test_daily_plan_display_includes_conflict_warning(self):
+        """display() should include conflict text when conflicts exist."""
+        plan = DailyPlan()
+        plan.conflicts = ["⚠ CONFLICT: 'A' overlaps 'B'"]
+        assert "CONFLICT" in plan.display()
+
+    # -- Scheduler custom start time -----------------------------------------
+
+    def test_custom_day_start_minute_respected(self):
+        """First scheduled entry should start at the custom day_start_minute."""
+        owner = Owner(name="Jordan", available_minutes=120)
+        pet = Pet(name="Mochi", species="dog", age_years=3)
+        pet.add_task(Task(title="Walk", duration_minutes=30, priority="high"))
+        owner.add_pet(pet)
+        plan = Scheduler(owner, day_start_minute=7 * 60).generate_plan()  # 7:00 AM
+        assert plan.entries[0].start_minute == 7 * 60
+
+    # -- next_occurrence preserves fields ------------------------------------
+
+    def test_next_occurrence_preserves_task_metadata(self):
+        """next_occurrence() should copy title, duration, priority, and category."""
+        task = Task(
+            title="Meds", duration_minutes=5, priority="high",
+            category="medical", frequency="daily", due_date=date.today(),
+        )
+        next_task = task.next_occurrence()
+        assert next_task is not None
+        assert next_task.title    == task.title
+        assert next_task.duration_minutes == task.duration_minutes
+        assert next_task.priority == task.priority
+        assert next_task.category == task.category
+        assert next_task.frequency == task.frequency
+
+    def test_next_occurrence_does_not_mutate_original(self):
+        """next_occurrence() must not change the original task's due_date."""
+        today = date.today()
+        task = Task(title="Walk", duration_minutes=30, priority="high",
+                    frequency="daily", due_date=today)
+        task.next_occurrence()
+        assert task.due_date == today   # original unchanged
+
+    # -- complete_task idempotency -------------------------------------------
+
+    def test_complete_task_no_pending_match_returns_none(self):
+        """complete_task() should return None when no pending task with that title exists.
+
+        Using frequency='as-needed' means no next occurrence is ever created,
+        so after completing the task once there is no pending 'Vet' left to complete.
+        """
+        pet = Pet(name="Mochi", species="dog", age_years=3)
+        pet.add_task(Task(title="Vet", duration_minutes=60, priority="high",
+                          frequency="as-needed"))
+        pet.complete_task("Vet")            # marks it done; no next occurrence added
+        result = pet.complete_task("Vet")   # no pending 'Vet' task exists → no-op
+        assert result is None
+        assert len(pet.tasks) == 1          # still just the one completed task
+
+    # -- filter_tasks combined and edge filters ------------------------------
+
+    def test_filter_tasks_combined_pet_and_category(self):
+        """Combining pet_name and category should only return matching tasks."""
+        owner = Owner(name="Jordan", available_minutes=120)
+        dog = Pet(name="Mochi", species="dog", age_years=3)
+        cat = Pet(name="Luna",  species="cat", age_years=5)
+        dog.add_task(Task(title="Meds", duration_minutes=5,  priority="high", category="medical"))
+        dog.add_task(Task(title="Walk", duration_minutes=30, priority="high", category="exercise"))
+        cat.add_task(Task(title="Cat meds", duration_minutes=5, priority="high", category="medical"))
+        owner.add_pet(dog)
+        owner.add_pet(cat)
+        result = owner.filter_tasks(pet_name="Mochi", category="medical")
+        assert len(result) == 1
+        assert result[0].title == "Meds"
+
+    def test_filter_tasks_nonexistent_pet_returns_empty(self):
+        """Filtering by a pet name that doesn't exist should return []."""
+        owner = Owner(name="Jordan", available_minutes=120)
+        pet = Pet(name="Mochi", species="dog", age_years=3)
+        pet.add_task(Task(title="Walk", duration_minutes=30, priority="high"))
+        owner.add_pet(pet)
+        assert owner.filter_tasks(pet_name="Ghost") == []
+
+    def test_filter_tasks_pet_name_case_insensitive(self):
+        """pet_name filter should match regardless of capitalisation."""
+        owner = Owner(name="Jordan", available_minutes=120)
+        pet = Pet(name="Mochi", species="dog", age_years=3)
+        pet.add_task(Task(title="Walk", duration_minutes=30, priority="high"))
+        owner.add_pet(pet)
+        assert len(owner.filter_tasks(pet_name="mochi")) == 1
+        assert len(owner.filter_tasks(pet_name="MOCHI")) == 1
+
+    # -- conflict detection edge cases ---------------------------------------
+
+    def test_detect_conflicts_exact_same_start_time(self):
+        """Two tasks pinned to the exact same minute must produce a conflict."""
+        owner = Owner(name="Jordan", available_minutes=240)
+        pet = Pet(name="Rex", species="dog", age_years=2)
+        pet.add_task(Task(title="Task A", duration_minutes=30, priority="high",
+                          pinned_start="09:00"))
+        pet.add_task(Task(title="Task B", duration_minutes=30, priority="high",
+                          pinned_start="09:00"))
+        owner.add_pet(pet)
+        plan = Scheduler(owner).generate_plan()
+        assert len(plan.conflicts) >= 1
+
+    def test_detect_conflicts_returns_empty_for_single_task(self):
+        """A plan with only one task can never have a conflict."""
+        owner = Owner(name="Jordan", available_minutes=120)
+        pet = Pet(name="Rex", species="dog", age_years=2)
+        pet.add_task(Task(title="Walk", duration_minutes=30, priority="high",
+                          pinned_start="09:00"))
+        owner.add_pet(pet)
+        plan = Scheduler(owner).generate_plan()
+        assert plan.conflicts == []
+
+    # -- remove_pet ----------------------------------------------------------
+
+    def test_remove_pet_reduces_count(self):
+        """remove_pet() should decrease the owner's pet list by 1."""
+        owner = Owner(name="Jordan", available_minutes=120)
+        owner.add_pet(Pet(name="Mochi", species="dog", age_years=3))
+        owner.add_pet(Pet(name="Luna",  species="cat", age_years=5))
+        assert len(owner.pets) == 2
+        owner.remove_pet("Mochi")
+        assert len(owner.pets) == 1
+        assert owner.pets[0].name == "Luna"
+
+    def test_remove_nonexistent_pet_is_noop(self):
+        """Removing a pet that was never added should not raise or change the list."""
+        owner = Owner(name="Jordan", available_minutes=120)
+        owner.add_pet(Pet(name="Mochi", species="dog", age_years=3))
+        owner.remove_pet("Ghost")
+        assert len(owner.pets) == 1
