@@ -32,6 +32,17 @@ source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
+## Smarter Scheduling
+
+PawPal+ includes four algorithmic features beyond basic priority-based scheduling:
+
+| Feature | Where | How it works |
+|---|---|---|
+| **Sort by time** | `Scheduler.sort_by_time()` | Sorts tasks by preferred time slot (morning → afternoon → evening → none) using a `lambda` key on the slot string. Tasks with a concrete `pinned_start` are sorted within their slot by exact minute. |
+| **Filter tasks** | `Owner.filter_tasks()` | Returns tasks matching any combination of `completed` status, `pet_name`, and `category`. Implemented as a series of list comprehensions so each filter is independent and easy to extend. |
+| **Recurring tasks** | `Task.next_occurrence()` + `Pet.complete_task()` | When a task with `frequency="daily"` or `"weekly"` is marked complete, Python's `timedelta` shifts the due date forward by 1 or 7 days and appends a fresh copy to the pet's task list automatically. `"as-needed"` tasks never auto-recur. |
+| **Conflict detection** | `Scheduler.detect_conflicts()` | After building the plan, checks every pair of `ScheduledEntry` items for interval overlap using `a.start < b.end AND b.start < a.end`. Returns human-readable warning strings; the plan is still produced rather than crashing. Only tasks with a `pinned_start` ("HH:MM") can produce conflicts — flexible tasks are sorted by slot, not pinned to a clock time. |
+
 ### Suggested workflow
 
 1. Read the scenario carefully and identify requirements and edge cases.

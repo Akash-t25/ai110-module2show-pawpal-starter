@@ -112,8 +112,9 @@ classDiagram
 
 **b. Tradeoffs**
 
-- Describe one tradeoff your scheduler makes.
-- Why is that tradeoff reasonable for this scenario?
+The scheduler uses **exact interval overlap** (`a.start < b.end AND b.start < a.end`) to detect conflicts, not a fuzzier "same time slot" check. This means two tasks pinned to "morning" without a concrete start time are never flagged as conflicting — only tasks with an explicit `pinned_start` in "HH:MM" format can trigger a warning.
+
+This tradeoff is intentional and reasonable for a personal pet-care app. Most tasks (walks, feedings, grooming) are flexible; only medical appointments or classes genuinely need a fixed clock time. Flagging every pair of morning tasks as conflicting would produce false positives that annoy users rather than help them. The slot-based sort handles the common case, while pinned-start conflict detection handles the exceptional cases that actually need it.
 
 ---
 
